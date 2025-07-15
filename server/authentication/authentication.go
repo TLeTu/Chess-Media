@@ -1,18 +1,15 @@
 package authentication
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/TLeTu/Chess-Media/server/database"
+	"github.com/TLeTu/Chess-Media/server/models"
+	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
-
-type User struct {
-	Username string
-	Password string
-}
 
 var secretKey = []byte("secret-key")
 
@@ -47,45 +44,46 @@ func verifyToken(tokenString string) error {
 	return nil
 }
 
-func LoginHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	var u User
-	json.NewDecoder(r.Body).Decode(&u)
-	fmt.Printf("The user request value %v", u)
-
-	if u.Username == "Chek" && u.Password == "123456" {
-		tokenString, err := createToken(u.Username)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprint(w, "No username found")
-		}
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, tokenString)
+func LoginHandler(c *gin.Context) {
+	var u models.User
+	if err := c.ShouldBindJSON(&u); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
-	} else {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, "Invalid credentials")
 	}
+
+	var foundUser models.User
+	if err := database.DB.Where("email = ?", u.Email).First(&foundUser).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	if foundUser.Password != u.Password {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	tokenString, err := createToken(foundUser.Email)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not create token"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": tokenString})
 }
 
-func ProtectedHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	tokenString := r.Header.Get("Authorization")
+func ProtectedHandler(c *gin.Context) {
+	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, "Missing authorization header")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
 		return
 	}
 	tokenString = tokenString[len("Bearer "):]
 
 	err := verifyToken(tokenString)
 	if err != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprint(w, "Invalid token")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 		return
 	}
 
-	fmt.Fprint(w, "Welcome to the the protected area")
+	c.String(http.StatusOK, "Welcome to the the protected area")
 
 }
