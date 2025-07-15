@@ -29,6 +29,7 @@ func main() {
 	r.Static("/node_modules", "../client/node_modules")
 
 	r.POST("/login", authentication.LoginHandler)
+	r.POST("/register", authentication.RegisterHandler)
 	r.GET("/protected", authentication.ProtectedHandler)
 
 	log.Println("Starting file server on :8080")

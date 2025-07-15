@@ -9,6 +9,7 @@ import (
 	"github.com/TLeTu/Chess-Media/server/models"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var secretKey = []byte("secret-key")
@@ -57,7 +58,7 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	if foundUser.Password != u.Password {
+	if !VerifyPassword(u.Password, foundUser.Password) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
@@ -68,6 +69,31 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"token": tokenString})
+}
+
+func RegisterHandler(c *gin.Context) {
+	var u models.User
+	if err := c.ShouldBindJSON(&u); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var foundUser models.User
+	if err := database.DB.Where("email = ?", u.Email).First(&foundUser).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "user already exists"})
+		return
+	}
+
+	var err error
+	if u.Password, err = HashPassword(u.Password); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "can't hash password"})
+	}
+
+	if err := database.DB.Create(&u).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "can't add to database"})
+	}
+
+	c.String(http.StatusOK, "User created")
 }
 
 func ProtectedHandler(c *gin.Context) {
@@ -86,4 +112,16 @@ func ProtectedHandler(c *gin.Context) {
 
 	c.String(http.StatusOK, "Welcome to the the protected area")
 
+}
+
+// HashPassword generates a bcrypt hash for the given password.
+func HashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	return string(bytes), err
+}
+
+// VerifyPassword verifies if the given password matches the stored hash.
+func VerifyPassword(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
 }
