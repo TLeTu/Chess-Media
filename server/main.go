@@ -4,6 +4,7 @@ import (
 	"log"
 
 	"github.com/TLeTu/Chess-Media/server/authentication"
+	"github.com/TLeTu/Chess-Media/server/bot"
 	"github.com/TLeTu/Chess-Media/server/database"
 	"github.com/TLeTu/Chess-Media/server/models"
 	"github.com/gin-gonic/gin"
@@ -21,7 +22,7 @@ func main() {
 	r := gin.Default()
 
 	r.StaticFile("/", "../client/pages/index.html")
-	r.StaticFile("/bot-chess", "../client/pages/bot-chess.html")
+	r.StaticFile("/bot", "../client/pages/bot-chess.html")
 
 	r.Static("/src", "../client/src")
 	r.Static("/assets", "../client/assets")
@@ -31,6 +32,8 @@ func main() {
 	r.POST("/login", authentication.LoginHandler)
 	r.POST("/register", authentication.RegisterHandler)
 	r.GET("/protected", authentication.ProtectedHandler)
+
+	r.POST("/bot/move", bot.BotMoveHandler)
 
 	log.Println("Starting file server on :8080")
 	if err := r.Run(":8080"); err != nil {
