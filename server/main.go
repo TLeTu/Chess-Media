@@ -23,14 +23,15 @@ func main() {
 
 	r.StaticFile("/", "../client/pages/index.html")
 	r.StaticFile("/bot", "../client/pages/bot-chess.html")
+	r.StaticFile("login", "../client/pages/login.html")
 
 	r.Static("/src", "../client/src")
 	r.Static("/assets", "../client/assets")
 	r.Static("/img", "../client/assets/img")
 	r.Static("/node_modules", "../client/node_modules")
 
-	r.POST("/login", authentication.LoginHandler)
-	r.POST("/register", authentication.RegisterHandler)
+	r.POST("/submit/login", authentication.LoginHandler)
+	r.POST("/submit/register", authentication.RegisterHandler)
 	r.GET("/protected", authentication.ProtectedHandler)
 
 	r.POST("/bot/move", bot.BotMoveHandler)

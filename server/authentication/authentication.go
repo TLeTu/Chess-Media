@@ -54,12 +54,12 @@ func LoginHandler(c *gin.Context) {
 
 	var foundUser models.User
 	if err := database.DB.Where("email = ?", u.Email).First(&foundUser).Error; err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email"})
 		return
 	}
 
 	if !VerifyPassword(u.Password, foundUser.Password) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid password"})
 		return
 	}
 
