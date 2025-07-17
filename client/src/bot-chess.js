@@ -39,7 +39,7 @@ async function handlePlayerMove(source, target) {
 
     console.log('Sending FEN:', currentFen); // Debugging line
 
-    const response = await fetch(`/bot/move`, {
+    const response = await fetch(`/api/bot/move`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

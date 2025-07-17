@@ -96,7 +96,7 @@ func RegisterHandler(c *gin.Context) {
 	c.String(http.StatusOK, "User created")
 }
 
-func ProtectedHandler(c *gin.Context) {
+func ValidateHandler(c *gin.Context) {
 	tokenString := c.GetHeader("Authorization")
 	if tokenString == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
@@ -110,7 +110,7 @@ func ProtectedHandler(c *gin.Context) {
 		return
 	}
 
-	c.String(http.StatusOK, "Welcome to the the protected area")
+	c.String(http.StatusOK, "Token validated")
 
 }
 

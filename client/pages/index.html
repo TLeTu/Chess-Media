@@ -3,11 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>Chess-Media</title>
+    <link rel="stylesheet" href="assets/styles/header.css">
+    <link rel="stylesheet" href="assets/styles/index.css">
 </head>
 <body>
-    <a href="/bot">
-        <button>PLAY WITH BOT</button>
-    </a>
+    <header>
+        <div class="logo">Chess-Media</div>
+        <div class="auth-buttons">
+            <a href="/login" id="loginBtn" class="login-btn">Login</a>
+            <button class="logout-btn" id="logoutBtn">Logout</button>
+        </div>
+    </header>
+    <div class="container">
+        <div class="play-options">
+            <button id="rankBtn">RANKED GAME</button>
+            <button id="hostBtn">HOST A ROOM</button>
+            <button id="joinBtn">JOIN A ROOM</button>
+            <button id="botBtn">PLAY WITH BOT</button>
+        </div>
+    </div>
+    <script src="src/header.js"></script>
+    <script src="src/index.js"></script>
 </body>
 </html>

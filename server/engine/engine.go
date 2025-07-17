@@ -206,9 +206,13 @@ const (
 	F8
 	G8
 	H8
+	NoSquare Square = -1
 )
 
 func (s Square) String() string {
+	if s == NoSquare {
+		return "-"
+	}
 	file := string(rune('a' + (s % 8)))
 	rank := strconv.Itoa(int(s/8 + 1))
 	return file + rank
@@ -217,19 +221,55 @@ func (s Square) String() string {
 // Board represents the 8x8 chessboard.
 type Board [64]Piece
 
+// GameStatus represents the current state of the game
+type GameStatus int
+
+const (
+	InProgress GameStatus = iota
+	Checkmate
+	Stalemate
+	DrawByRepetition
+	DrawByFiftyMoveRule
+	DrawByInsufficientMaterial
+)
+
+func (gs GameStatus) String() string {
+	switch gs {
+	case InProgress:
+		return "in_progress"
+	case Checkmate:
+		return "checkmate"
+	case Stalemate:
+		return "stalemate"
+	case DrawByRepetition:
+		return "draw_by_repetition"
+	case DrawByFiftyMoveRule:
+		return "draw_by_fifty_move_rule"
+	case DrawByInsufficientMaterial:
+		return "draw_by_insufficient_material"
+	default:
+		return "unknown"
+	}
+}
+
 // Position encapsulates the entire state of the game.
 type Position struct {
 	Board          Board
 	Turn           Color
 	CastlingRights string // KQkq, KQk, etc.
-	EnPassant      Square // -1 if no en passant square
+	EnPassant      Square // NoSquare if no en passant square
 	HalfMoveClock  int    // For 50-move rule
 	FullMoveNumber int    // Increments after Black's move
+
+	// Cache for performance optimization
+	whiteKingPos Square
+	blackKingPos Square
+	positionHash uint64 // For threefold repetition detection
 }
 
 // NewGame creates a new game in the starting position.
 func NewGame() *Position {
-	return &Position{
+	pos := &Position{
 		Board: Board{
 			A1: WhiteRook, B1: WhiteKnight, C1: WhiteBishop, D1: WhiteQueen, E1: WhiteKing, F1: WhiteBishop, G1: WhiteKnight, H1: WhiteRook,
 			A2: WhitePawn, B2: WhitePawn, C2: WhitePawn, D2: WhitePawn, E2: WhitePawn, F2: WhitePawn, G2: WhitePawn, H2: WhitePawn,
@@ -238,9 +278,31 @@ func NewGame() *Position {
 		},
 		Turn:           White,
 		CastlingRights: "KQkq",
-		EnPassant:      -1, // No en passant square initially
+		EnPassant:      NoSquare,
 		HalfMoveClock:  0,
 		FullMoveNumber: 1,
+	}
+
+	// Initialize king positions
+	pos.updateKingPositions()
+
+	return pos
+}
+
+// updateKingPositions finds and caches the positions of both kings
+func (pos *Position) updateKingPositions() {
+	pos.whiteKingPos = NoSquare
+	pos.blackKingPos = NoSquare
+
+	for sq := A1; sq <= H8; sq++ {
+		piece := pos.Board[sq]
+		if piece.Type() == King {
+			if piece.Color() == White {
+				pos.whiteKingPos = sq
+			} else if piece.Color() == Black {
+				pos.blackKingPos = sq
+			}
+		}
 	}
 }
 
@@ -251,7 +313,9 @@ func ParseFEN(fen string) (*Position, error) {
 		return nil, fmt.Errorf("invalid FEN string: %s", fen)
 	}
 
-	pos := &Position{}
+	pos := &Position{
+		EnPassant: NoSquare, // Default to no en passant square
+	}
 
 	// Parse board
 	boardStr := parts[0]
@@ -291,6 +355,8 @@ func ParseFEN(fen string) (*Position, error) {
 				piece = BlackQueen
 			case 'k':
 				piece = BlackKing
+			default:
+				return nil, fmt.Errorf("invalid piece character in FEN: %c", r)
 			}
 			pos.Board[rank*8+file] = piece
 			file++
@@ -308,30 +374,55 @@ func ParseFEN(fen string) (*Position, error) {
 	}
 
 	// Parse castling rights
-	pos.CastlingRights = parts[2]
+	if parts[2] == "-" {
+		pos.CastlingRights = ""
+	} else {
+		// Validate castling rights
+		validChars := "KQkq"
+		for _, c := range parts[2] {
+			if !strings.ContainsRune(validChars, c) {
+				return nil, fmt.Errorf("invalid castling rights in FEN: %s", parts[2])
+			}
+		}
+		pos.CastlingRights = parts[2]
+	}
 
 	// Parse en passant square
 	if parts[3] != "-" {
+		if len(parts[3]) != 2 {
+			return nil, fmt.Errorf("invalid en passant square in FEN: %s", parts[3])
+		}
 		fileChar := parts[3][0]
 		rankChar := parts[3][1]
+
+		if fileChar < 'a' || fileChar > 'h' || rankChar < '1' || rankChar > '8' {
+			return nil, fmt.Errorf("invalid en passant square in FEN: %s", parts[3])
+		}
+
 		pos.EnPassant = Square(int(rankChar-'1')*8 + int(fileChar-'a'))
-	} else {
-		pos.EnPassant = -1
 	}
 
 	// Parse half-move clock
 	halfMove, err := strconv.Atoi(parts[4])
-	if err != nil {
+	if err != nil || halfMove < 0 {
 		return nil, fmt.Errorf("invalid half-move clock in FEN: %s", parts[4])
 	}
 	pos.HalfMoveClock = halfMove
 
 	// Parse full-move number
 	fullMove, err := strconv.Atoi(parts[5])
-	if err != nil {
+	if err != nil || fullMove < 1 {
 		return nil, fmt.Errorf("invalid full-move number in FEN: %s", parts[5])
 	}
 	pos.FullMoveNumber = fullMove
+
+	// Update king positions
+	pos.updateKingPositions()
+
+	// Validate that both kings are present
+	if pos.whiteKingPos == NoSquare || pos.blackKingPos == NoSquare {
+		return nil, fmt.Errorf("invalid FEN: missing king(s)")
+	}
 
 	return pos, nil
 }
@@ -362,14 +453,19 @@ func (p *Position) String() string {
 	}
 
 	enPassantStr := "-"
-	if p.EnPassant != -1 {
+	if p.EnPassant != NoSquare {
 		enPassantStr = p.EnPassant.String()
+	}
+
+	castlingRights := p.CastlingRights
+	if castlingRights == "" {
+		castlingRights = "-"
 	}
 
 	return fmt.Sprintf("%s %s %s %s %d %d",
 		boardStr.String(),
 		p.Turn.String(),
-		p.CastlingRights,
+		castlingRights,
 		enPassantStr,
 		p.HalfMoveClock,
 		p.FullMoveNumber,
@@ -384,6 +480,14 @@ type Move struct {
 	IsCapture   bool
 	IsCastling  bool
 	IsEnPassant bool
+}
+
+func (m Move) String() string {
+	s := m.From.String() + m.To.String()
+	if m.Promotion != NoPieceType {
+		s += m.Promotion.String()
+	}
+	return s
 }
 
 // GenerateLegalMoves generates all legal moves for the current position.
@@ -426,37 +530,60 @@ func (pos *Position) GenerateLegalMoves() []Move {
 
 // ApplyMove applies a move to the position and returns a new position.
 func ApplyMove(pos *Position, move Move) *Position {
-	newBoard := pos.Board
-	newBoard[move.To] = newBoard[move.From]
-	newBoard[move.From] = Empty
+	// Create a new position with copied board
+	newPos := &Position{
+		Turn:           oppositeColor(pos.Turn),
+		CastlingRights: pos.CastlingRights,
+		EnPassant:      NoSquare,              // Default to no en passant square
+		HalfMoveClock:  pos.HalfMoveClock + 1, // Increment half-move clock
+		FullMoveNumber: pos.FullMoveNumber,
+		whiteKingPos:   pos.whiteKingPos,
+		blackKingPos:   pos.blackKingPos,
+	}
+
+	// Copy the board
+	copy(newPos.Board[:], pos.Board[:])
+
+	// Make the move
+	movingPiece := newPos.Board[move.From]
+	capturedPiece := newPos.Board[move.To] // Store captured piece (if any)
+
+	// Update the board
+	newPos.Board[move.To] = movingPiece
+	newPos.Board[move.From] = Empty
+
+	// Set the IsCapture flag if there was a piece captured
+	if capturedPiece != Empty {
+		move.IsCapture = true
+	}
 
 	// Handle pawn promotion
 	if move.Promotion != NoPieceType {
-		color := newBoard[move.To].Color()
+		color := movingPiece.Color()
 		switch move.Promotion {
 		case Queen:
 			if color == White {
-				newBoard[move.To] = WhiteQueen
+				newPos.Board[move.To] = WhiteQueen
 			} else {
-				newBoard[move.To] = BlackQueen
+				newPos.Board[move.To] = BlackQueen
 			}
 		case Rook:
 			if color == White {
-				newBoard[move.To] = WhiteRook
+				newPos.Board[move.To] = WhiteRook
 			} else {
-				newBoard[move.To] = BlackRook
+				newPos.Board[move.To] = BlackRook
 			}
 		case Bishop:
 			if color == White {
-				newBoard[move.To] = WhiteBishop
+				newPos.Board[move.To] = WhiteBishop
 			} else {
-				newBoard[move.To] = BlackBishop
+				newPos.Board[move.To] = BlackBishop
 			}
 		case Knight:
 			if color == White {
-				newBoard[move.To] = WhiteKnight
+				newPos.Board[move.To] = WhiteKnight
 			} else {
-				newBoard[move.To] = BlackKnight
+				newPos.Board[move.To] = BlackKnight
 			}
 		}
 	}
@@ -464,99 +591,93 @@ func ApplyMove(pos *Position, move Move) *Position {
 	// Handle en passant capture
 	if move.IsEnPassant {
 		if pos.Turn == White {
-			newBoard[move.To-8] = Empty // Captured black pawn
+			newPos.Board[move.To-8] = Empty // Captured black pawn
 		} else {
-			newBoard[move.To+8] = Empty // Captured white pawn
+			newPos.Board[move.To+8] = Empty // Captured white pawn
 		}
 	}
 
 	// Update en passant square for next turn
-	newEnPassant := Square(-1)
-	if newBoard[move.To].Type() == Pawn && abs(int(move.From)-int(move.To)) == 16 {
+	if movingPiece.Type() == Pawn && abs(int(move.From)-int(move.To)) == 16 {
 		if pos.Turn == White {
-			newEnPassant = move.To - 8
+			newPos.EnPassant = move.From + 8
 		} else {
-			newEnPassant = move.To + 8
+			newPos.EnPassant = move.From - 8
 		}
 	}
 
 	// Handle castling
 	if move.IsCastling {
-
-		if move.To == G1 { // White King-side castling
-			newBoard[F1] = newBoard[H1]
-			newBoard[H1] = Empty
-		} else if move.To == C1 { // White Queen-side castling
-			newBoard[D1] = newBoard[A1]
-			newBoard[A1] = Empty
-		} else if move.To == G8 { // Black King-side castling
-			newBoard[F8] = newBoard[H8]
-			newBoard[H8] = Empty
-		} else if move.To == C8 { // Black Queen-side castling
-			newBoard[D8] = newBoard[A8]
-			newBoard[A8] = Empty
+		switch move.To {
+		case G1: // White King-side castling
+			newPos.Board[F1] = newPos.Board[H1]
+			newPos.Board[H1] = Empty
+		case C1: // White Queen-side castling
+			newPos.Board[D1] = newPos.Board[A1]
+			newPos.Board[A1] = Empty
+		case G8: // Black King-side castling
+			newPos.Board[F8] = newPos.Board[H8]
+			newPos.Board[H8] = Empty
+		case C8: // Black Queen-side castling
+			newPos.Board[D8] = newPos.Board[A8]
+			newPos.Board[A8] = Empty
 		}
 	}
 
 	// Update castling rights
 	newCastlingRights := pos.CastlingRights
-	if pos.Turn == White {
-		if move.From == E1 {
+
+	// If king moves, remove both castling rights for that color
+	if movingPiece.Type() == King {
+		if pos.Turn == White {
 			newCastlingRights = strings.ReplaceAll(newCastlingRights, "K", "")
 			newCastlingRights = strings.ReplaceAll(newCastlingRights, "Q", "")
-		} else if move.From == A1 {
-			newCastlingRights = strings.ReplaceAll(newCastlingRights, "Q", "")
-		} else if move.From == H1 {
-			newCastlingRights = strings.ReplaceAll(newCastlingRights, "K", "")
-		}
-	} else { // Black
-		if move.From == E8 {
+			newPos.whiteKingPos = move.To // Update king position
+		} else {
 			newCastlingRights = strings.ReplaceAll(newCastlingRights, "k", "")
 			newCastlingRights = strings.ReplaceAll(newCastlingRights, "q", "")
-		} else if move.From == A8 {
-			newCastlingRights = strings.ReplaceAll(newCastlingRights, "q", "")
-		} else if move.From == H8 {
-			newCastlingRights = strings.ReplaceAll(newCastlingRights, "k", "")
+			newPos.blackKingPos = move.To // Update king position
 		}
-	}
-	if newCastlingRights == "" {
-		newCastlingRights = "-"
 	}
 
-	// Update half-move clock
-	newHalfMoveClock := pos.HalfMoveClock + 1
-	if move.IsCapture || newBoard[move.To].Type() == Pawn {
-		newHalfMoveClock = 0
+	// If rook moves or is captured, remove the corresponding castling right
+	if move.From == A1 || move.To == A1 {
+		newCastlingRights = strings.ReplaceAll(newCastlingRights, "Q", "")
+	}
+	if move.From == H1 || move.To == H1 {
+		newCastlingRights = strings.ReplaceAll(newCastlingRights, "K", "")
+	}
+	if move.From == A8 || move.To == A8 {
+		newCastlingRights = strings.ReplaceAll(newCastlingRights, "q", "")
+	}
+	if move.From == H8 || move.To == H8 {
+		newCastlingRights = strings.ReplaceAll(newCastlingRights, "k", "")
+	}
+
+	newPos.CastlingRights = newCastlingRights
+
+	// Reset half-move clock on pawn move or capture
+	if movingPiece.Type() == Pawn || move.IsCapture {
+		newPos.HalfMoveClock = 0
 	}
 
 	// Update full-move number
-	newFullMoveNumber := pos.FullMoveNumber
 	if pos.Turn == Black {
-		newFullMoveNumber++
+		newPos.FullMoveNumber++
 	}
 
-	return &Position{
-		Board:          newBoard,
-		Turn:           oppositeColor(pos.Turn),
-		CastlingRights: newCastlingRights,
-		EnPassant:      newEnPassant,
-		HalfMoveClock:  newHalfMoveClock,
-		FullMoveNumber: newFullMoveNumber,
-	}
+	return newPos
 }
 
 // IsKingInCheck checks if the king of the given color is in check.
 func IsKingInCheck(pos *Position, color Color) bool {
-	kingSquare := Square(-1)
-	for sq := A1; sq <= H8; sq++ {
-		piece := pos.Board[sq]
-		if piece.Type() == King && piece.Color() == color {
-			kingSquare = sq
-			break
-		}
+	// Get the king's position from cache
+	kingSquare := pos.whiteKingPos
+	if color == Black {
+		kingSquare = pos.blackKingPos
 	}
 
-	if kingSquare == -1 {
+	if kingSquare == NoSquare {
 		return false // Should not happen in a valid game
 	}
 
@@ -591,7 +712,114 @@ func IsKingInCheck(pos *Position, color Color) bool {
 	return false
 }
 
-// Helper functions for move generation (to be implemented later)
+// GetGameStatus returns the current status of the game
+func (pos *Position) GetGameStatus() GameStatus {
+	// Check for checkmate or stalemate
+	legalMoves := pos.GenerateLegalMoves()
+	if len(legalMoves) == 0 {
+		if IsKingInCheck(pos, pos.Turn) {
+			return Checkmate
+		}
+		return Stalemate
+	}
+
+	// Check for 50-move rule
+	if pos.HalfMoveClock >= 100 { // 50 moves = 100 half-moves
+		return DrawByFiftyMoveRule
+	}
+
+	// Check for insufficient material
+	if hasInsufficientMaterial(pos) {
+		return DrawByInsufficientMaterial
+	}
+
+	// Game is still in progress
+	return InProgress
+}
+
+// hasInsufficientMaterial checks if there is insufficient material for checkmate
+func hasInsufficientMaterial(pos *Position) bool {
+	// Count pieces
+	whitePieces := 0
+	blackPieces := 0
+	whiteKnights := 0
+	blackKnights := 0
+	whiteBishops := 0
+	blackBishops := 0
+	whiteBishopSquareColor := -1 // -1 = not set, 0 = light square, 1 = dark square
+	blackBishopSquareColor := -1
+
+	for sq := A1; sq <= H8; sq++ {
+		piece := pos.Board[sq]
+		if piece == Empty {
+			continue
+		}
+
+		switch piece {
+		case WhitePawn, WhiteRook, WhiteQueen:
+			return false // White has material for checkmate
+		case BlackPawn, BlackRook, BlackQueen:
+			return false // Black has material for checkmate
+		case WhiteKnight:
+			whiteKnights++
+			whitePieces++
+		case BlackKnight:
+			blackKnights++
+			blackPieces++
+		case WhiteBishop:
+			whiteBishops++
+			whitePieces++
+			// Determine bishop's square color (light or dark)
+			squareColor := (int(sq/8) + int(sq%8)) % 2
+			if whiteBishopSquareColor == -1 {
+				whiteBishopSquareColor = squareColor
+			} else if whiteBishopSquareColor != squareColor {
+				return false // Bishops on different colored squares can checkmate
+			}
+		case BlackBishop:
+			blackBishops++
+			blackPieces++
+			// Determine bishop's square color
+			squareColor := (int(sq/8) + int(sq%8)) % 2
+			if blackBishopSquareColor == -1 {
+				blackBishopSquareColor = squareColor
+			} else if blackBishopSquareColor != squareColor {
+				return false // Bishops on different colored squares can checkmate
+			}
+		case WhiteKing:
+			whitePieces++
+		case BlackKing:
+			blackPieces++
+		}
+	}
+
+	// King vs King
+	if whitePieces == 1 && blackPieces == 1 {
+		return true
+	}
+
+	// King + Bishop vs King or King + Knight vs King
+	if (whitePieces == 2 && blackPieces == 1 && (whiteBishops == 1 || whiteKnights == 1)) ||
+		(blackPieces == 2 && whitePieces == 1 && (blackBishops == 1 || blackKnights == 1)) {
+		return true
+	}
+
+	// King + 2 Knights vs King (technically can checkmate but practically a draw)
+	if (whitePieces == 3 && blackPieces == 1 && whiteKnights == 2) ||
+		(blackPieces == 3 && whitePieces == 1 && blackKnights == 2) {
+		return true
+	}
+
+	// King + Bishop vs King + Bishop (same colored bishops)
+	if whitePieces == 2 && blackPieces == 2 && whiteBishops == 1 && blackBishops == 1 &&
+		whiteBishopSquareColor == blackBishopSquareColor {
+		return true
+	}
+
+	return false
+}
+
+// Helper functions for move generation
 func generatePawnMoves(pos *Position, sq Square) []Move {
 	moves := []Move{}
 	piece := pos.Board[sq]
@@ -611,48 +839,54 @@ func generatePawnMoves(pos *Position, sq Square) []Move {
 
 	// Single push
 	targetSq := sq + Square(direction)
-	if pos.Board[targetSq] == Empty {
-		moves = append(moves, Move{From: sq, To: targetSq})
+	if targetSq >= 0 && targetSq < 64 && pos.Board[targetSq] == Empty {
+		if (targetSq / 8) == Square(promotionRank) {
+			// Pawn promotion
+			moves = append(moves, Move{From: sq, To: targetSq, Promotion: Queen})
+			moves = append(moves, Move{From: sq, To: targetSq, Promotion: Rook})
+			moves = append(moves, Move{From: sq, To: targetSq, Promotion: Bishop})
+			moves = append(moves, Move{From: sq, To: targetSq, Promotion: Knight})
+		} else {
+			moves = append(moves, Move{From: sq, To: targetSq})
+		}
 
-		// Double push
+		// Double push from starting rank
 		if (sq / 8) == Square(startRank) {
 			doublePushTargetSq := sq + Square(direction*2)
-			if pos.Board[doublePushTargetSq] == Empty {
+			if doublePushTargetSq >= 0 && doublePushTargetSq < 64 && pos.Board[doublePushTargetSq] == Empty {
 				moves = append(moves, Move{From: sq, To: doublePushTargetSq})
 			}
 		}
 	}
 
-	// Captures
-	captureTargets := []Square{sq + Square(direction-1), sq + Square(direction+1)}
-	for _, target := range captureTargets {
-		if target < 0 || target > 63 || (abs(int(target%8)-int(sq%8)) != 1) {
-			continue // Check if target is off board or not diagonal
-		}
-		capturedPiece := pos.Board[target]
-		if capturedPiece != Empty && capturedPiece.Color() != piece.Color() {
-			moves = append(moves, Move{From: sq, To: target, IsCapture: true})
-		}
-		// En passant
-		if target == pos.EnPassant && pos.EnPassant != -1 {
-			moves = append(moves, Move{From: sq, To: target, IsCapture: true, IsEnPassant: true})
+	// Captures (including en passant)
+	for _, offset := range []int{-1, 1} {
+		captureTargetSq := sq + Square(direction+offset)
+		if captureTargetSq >= 0 && captureTargetSq < 64 &&
+			abs(int(captureTargetSq%8)-int(sq%8)) == 1 { // Ensure we don't wrap around the board
+
+			// Normal capture
+			capturedPiece := pos.Board[captureTargetSq]
+			if capturedPiece != Empty && capturedPiece.Color() != piece.Color() {
+				if (captureTargetSq / 8) == Square(promotionRank) {
+					// Capture with promotion
+					moves = append(moves, Move{From: sq, To: captureTargetSq, Promotion: Queen, IsCapture: true})
+					moves = append(moves, Move{From: sq, To: captureTargetSq, Promotion: Rook, IsCapture: true})
+					moves = append(moves, Move{From: sq, To: captureTargetSq, Promotion: Bishop, IsCapture: true})
+					moves = append(moves, Move{From: sq, To: captureTargetSq, Promotion: Knight, IsCapture: true})
+				} else {
+					moves = append(moves, Move{From: sq, To: captureTargetSq, IsCapture: true})
+				}
+			}
+
+			// En passant capture
+			if captureTargetSq == pos.EnPassant && pos.EnPassant != NoSquare {
+				moves = append(moves, Move{From: sq, To: captureTargetSq, IsCapture: true, IsEnPassant: true})
+			}
 		}
 	}
 
-	// Handle promotions
-	finalMoves := []Move{}
-	for _, move := range moves {
-		if (move.To / 8) == Square(promotionRank) {
-			finalMoves = append(finalMoves, Move{From: move.From, To: move.To, Promotion: Queen, IsCapture: move.IsCapture})
-			finalMoves = append(finalMoves, Move{From: move.From, To: move.To, Promotion: Rook, IsCapture: move.IsCapture})
-			finalMoves = append(finalMoves, Move{From: move.From, To: move.To, Promotion: Bishop, IsCapture: move.IsCapture})
-			finalMoves = append(finalMoves, Move{From: move.From, To: move.To, Promotion: Knight, IsCapture: move.IsCapture})
-		} else {
-			finalMoves = append(finalMoves, move)
-		}
-	}
-
-	return finalMoves
+	return moves
 }
 
 func generateKnightMoves(pos *Position, sq Square) []Move {
@@ -766,59 +1000,79 @@ func generateKingMoves(pos *Position, sq Square) []Move {
 	}
 
 	// Castling moves
-	// King-side castling
-	if (pos.Turn == White && sq == E1 && strings.Contains(pos.CastlingRights, "K")) &&
-		pos.Board[F1] == Empty && pos.Board[G1] == Empty &&
-		!IsKingInCheck(pos, White) &&
-		!IsKingInCheck(ApplyMove(pos, Move{From: E1, To: F1}), White) &&
-		!IsKingInCheck(ApplyMove(pos, Move{From: E1, To: G1}), White) {
-		moves = append(moves, Move{From: E1, To: G1, IsCastling: true})
-	}
-	if (pos.Turn == Black && sq == E8 && strings.Contains(pos.CastlingRights, "k")) &&
-		pos.Board[F8] == Empty && pos.Board[G8] == Empty &&
-		!IsKingInCheck(pos, Black) &&
-		!IsKingInCheck(ApplyMove(pos, Move{From: E8, To: F8}), Black) &&
-		!IsKingInCheck(ApplyMove(pos, Move{From: E8, To: G8}), Black) {
-		moves = append(moves, Move{From: E8, To: G8, IsCastling: true})
-	}
+	if pos.Turn == White && sq == E1 {
+		// King-side castling
+		if strings.Contains(pos.CastlingRights, "K") &&
+			pos.Board[F1] == Empty && pos.Board[G1] == Empty &&
+			!IsKingInCheck(pos, White) {
+			// Check if squares are not under attack
+			tempPos1 := ApplyMove(pos, Move{From: E1, To: F1})
+			tempPos2 := ApplyMove(pos, Move{From: E1, To: G1})
+			if !IsKingInCheck(tempPos1, White) && !IsKingInCheck(tempPos2, White) {
+				moves = append(moves, Move{From: E1, To: G1, IsCastling: true})
+			}
+		}
 
-	// Queen-side castling
-	if (pos.Turn == White && sq == E1 && strings.Contains(pos.CastlingRights, "Q")) &&
-		pos.Board[B1] == Empty && pos.Board[C1] == Empty && pos.Board[D1] == Empty &&
-		!IsKingInCheck(pos, White) &&
-		!IsKingInCheck(ApplyMove(pos, Move{From: E1, To: D1}), White) &&
-		!IsKingInCheck(ApplyMove(pos, Move{From: E1, To: C1}), White) {
-		moves = append(moves, Move{From: E1, To: C1, IsCastling: true})
-	}
-	if (pos.Turn == Black && sq == E8 && strings.Contains(pos.CastlingRights, "q")) &&
-		pos.Board[B8] == Empty && pos.Board[C8] == Empty && pos.Board[D8] == Empty &&
-		!IsKingInCheck(pos, Black) &&
-		!IsKingInCheck(ApplyMove(pos, Move{From: E8, To: D8}), Black) &&
-		!IsKingInCheck(ApplyMove(pos, Move{From: E8, To: C8}), Black) {
-		moves = append(moves, Move{From: E8, To: C8, IsCastling: true})
+		// Queen-side castling
+		if strings.Contains(pos.CastlingRights, "Q") &&
+			pos.Board[D1] == Empty && pos.Board[C1] == Empty && pos.Board[B1] == Empty &&
+			!IsKingInCheck(pos, White) {
+			// Check if squares are not under attack
+			tempPos1 := ApplyMove(pos, Move{From: E1, To: D1})
+			tempPos2 := ApplyMove(pos, Move{From: E1, To: C1})
+			if !IsKingInCheck(tempPos1, White) && !IsKingInCheck(tempPos2, White) {
+				moves = append(moves, Move{From: E1, To: C1, IsCastling: true})
+			}
+		}
+	} else if pos.Turn == Black && sq == E8 {
+		// King-side castling
+		if strings.Contains(pos.CastlingRights, "k") &&
+			pos.Board[F8] == Empty && pos.Board[G8] == Empty &&
+			!IsKingInCheck(pos, Black) {
+			// Check if squares are not under attack
+			tempPos1 := ApplyMove(pos, Move{From: E8, To: F8})
+			tempPos2 := ApplyMove(pos, Move{From: E8, To: G8})
+			if !IsKingInCheck(tempPos1, Black) && !IsKingInCheck(tempPos2, Black) {
+				moves = append(moves, Move{From: E8, To: G8, IsCastling: true})
+			}
+		}
+
+		// Queen-side castling
+		if strings.Contains(pos.CastlingRights, "q") &&
+			pos.Board[D8] == Empty && pos.Board[C8] == Empty && pos.Board[B8] == Empty &&
+			!IsKingInCheck(pos, Black) {
+			// Check if squares are not under attack
+			tempPos1 := ApplyMove(pos, Move{From: E8, To: D8})
+			tempPos2 := ApplyMove(pos, Move{From: E8, To: C8})
+			if !IsKingInCheck(tempPos1, Black) && !IsKingInCheck(tempPos2, Black) {
+				moves = append(moves, Move{From: E8, To: C8, IsCastling: true})
+			}
+		}
 	}
 
 	return moves
 }
 
-// Helper functions for IsKingInCheck (to be implemented later)
+// Helper functions for IsKingInCheck
 func isPawnAttacking(pos *Position, kingSquare Square, attackerColor Color) bool {
 	kingRow, kingCol := int(kingSquare/8), int(kingSquare%8)
 
+	// Direction from attacker's perspective to the king
 	direction := 0
 	if attackerColor == White {
-		direction = -1 // White pawns attack downwards relative to their perspective
+		direction = 1 // White pawns attack upwards (from rank 1-8 perspective)
 	} else {
-		direction = 1 // Black pawns attack upwards relative to their perspective
+		direction = -1 // Black pawns attack downwards (from rank 8-1 perspective)
 	}
 
-	// Check diagonal attacks
+	// Check diagonal attacks - pawns attack diagonally forward
 	attackOffsets := []int{-1, 1}
 	for _, offset := range attackOffsets {
-		targetRow, targetCol := kingRow+direction, kingCol+offset
+		// Look for pawns that could attack the king square
+		attackerRow, attackerCol := kingRow-direction, kingCol+offset
 
-		if targetRow >= 0 && targetRow < 8 && targetCol >= 0 && targetCol < 8 {
-			attackerPiece := pos.Board[Square(targetRow*8+targetCol)]
+		if attackerRow >= 0 && attackerRow < 8 && attackerCol >= 0 && attackerCol < 8 {
+			attackerPiece := pos.Board[Square(attackerRow*8+attackerCol)]
 			if attackerPiece.Type() == Pawn && attackerPiece.Color() == attackerColor {
 				return true
 			}
@@ -857,12 +1111,6 @@ func isSliderAttacking(pos *Position, kingSquare Square, attackerColor Color, sl
 		deltas = [][2]int{{-1, -1}, {-1, 1}, {1, -1}, {1, 1}} // Diagonal
 	case Rook:
 		deltas = [][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}} // Straight
-	case Queen:
-		deltas = [][2]int{
-			{-1, -1}, {-1, 0}, {-1, 1},
-			{0, -1}, {0, 1},
-			{1, -1}, {1, 0}, {1, 1}, // All 8 directions
-		}
 	}
 
 	for _, delta := range deltas {
@@ -877,7 +1125,10 @@ func isSliderAttacking(pos *Position, kingSquare Square, attackerColor Color, sl
 			piece := pos.Board[targetSq]
 
 			if piece != Empty {
-				if piece.Color() == attackerColor && (piece.Type() == sliderType || (sliderType == Bishop && piece.Type() == Queen) || (sliderType == Rook && piece.Type() == Queen)) {
+				if piece.Color() == attackerColor &&
+					(piece.Type() == sliderType ||
+						(sliderType == Bishop && piece.Type() == Queen) ||
+						(sliderType == Rook && piece.Type() == Queen)) {
 					return true
 				}
 				break // Blocked by any piece
@@ -909,6 +1160,68 @@ func isKingAttacking(pos *Position, kingSquare Square, attackerColor Color) bool
 	return false
 }
 
+// FindMove finds a move in the list of legal moves that matches the given from and to squares
+func (pos *Position) FindMove(from, to Square, promotionPiece PieceType) (Move, bool) {
+	legalMoves := pos.GenerateLegalMoves()
+
+	for _, move := range legalMoves {
+		if move.From == from && move.To == to {
+			// For non-promotion moves or if promotion piece matches
+			if (move.Promotion == NoPieceType && promotionPiece == NoPieceType) ||
+				(move.Promotion == promotionPiece) {
+				return move, true
+			}
+		}
+	}
+
+	return Move{}, false
+}
+
+// ParseMove parses a move string in algebraic notation (e.g., "e2e4")
+func ParseMove(pos *Position, moveStr string) (Move, error) {
+	if len(moveStr) < 4 {
+		return Move{}, fmt.Errorf("invalid move format: %s", moveStr)
+	}
+
+	fromFile := moveStr[0] - 'a'
+	fromRank := moveStr[1] - '1'
+	toFile := moveStr[2] - 'a'
+	toRank := moveStr[3] - '1'
+
+	if fromFile < 0 || fromFile > 7 || fromRank < 0 || fromRank > 7 ||
+		toFile < 0 || toFile > 7 || toRank < 0 || toRank > 7 {
+		return Move{}, fmt.Errorf("invalid move coordinates: %s", moveStr)
+	}
+
+	from := Square(int(fromRank)*8 + int(fromFile))
+	to := Square(int(toRank)*8 + int(toFile))
+
+	// Check for promotion
+	promotionPiece := NoPieceType
+	if len(moveStr) > 4 {
+		switch moveStr[4] {
+		case 'q':
+			promotionPiece = Queen
+		case 'r':
+			promotionPiece = Rook
+		case 'b':
+			promotionPiece = Bishop
+		case 'n':
+			promotionPiece = Knight
+		default:
+			return Move{}, fmt.Errorf("invalid promotion piece: %c", moveStr[4])
+		}
+	}
+
+	// Find the move in legal moves
+	move, found := pos.FindMove(from, to, promotionPiece)
+	if !found {
+		return Move{}, fmt.Errorf("illegal move: %s", moveStr)
+	}
+
+	return move, nil
+}
+
 // Utility functions
 func abs(x int) int {
 	if x < 0 {
@@ -924,7 +1237,7 @@ func oppositeColor(c Color) Color {
 	return White
 }
 
-// InitBoard is a placeholder for now, will be implemented later.
+// InitBoard creates a new game with the starting position.
 func InitBoard() *Position {
 	return NewGame()
 }

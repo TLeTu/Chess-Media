@@ -6,7 +6,7 @@ loginForm.addEventListener("submit", async function (event) {
     const password = document.getElementById("password").value;
 
     try {
-        const response = await fetch(`/submit/login`, {
+        const response = await fetch(`/api/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -24,7 +24,7 @@ loginForm.addEventListener("submit", async function (event) {
         const jwtToken = data.token;
 
         localStorage.setItem("jwtToken", jwtToken);
-        // window.location.href = '/';
+        window.location.href = '/';
     }
     catch (error) {
         console.error('Error during login:', error);
