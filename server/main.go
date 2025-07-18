@@ -23,7 +23,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-var hub = chesswebsocket.NewHub() // Create a single hub instance
+var hub = chesswebsocket.newHub() // Create a single hub instance
 
 func init() {
 	go hub.Run() // start the hub's event loop in the bg
