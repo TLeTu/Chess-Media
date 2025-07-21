@@ -2,6 +2,7 @@ package authentication
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -75,6 +76,8 @@ func RegisterHandler(c *gin.Context) {
 	var u models.User
 	if err := c.ShouldBindJSON(&u); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		// Log the error
+		log.Printf("Error binding JSON: %v", err)
 		return
 	}
 

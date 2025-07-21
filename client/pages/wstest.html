@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebSocket Test</title>
+</head>
+<body>
+    <h1>WebSocket Test Client</h1>
+    <div>
+        <label for="roomID">Room ID:</label>
+        <input type="text" id="roomID" placeholder="Enter Room ID from curl">
+        <button id="connectBtn">Connect</button>
+    </div>
+    <hr>
+    <div>
+        <label for="message">Message:</label>
+        <input type="text" id="message" placeholder="Enter message to send">
+        <button id="sendBtn" disabled>Send</button>
+    </div>
+    <hr>
+    <h3>Received Messages:</h3>
+    <div id="log" style="border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: scroll;"></div>
+
+    <script>
+        const roomIDInput = document.getElementById('roomID');
+        const connectBtn = document.getElementById('connectBtn');
+        const messageInput = document.getElementById('message');
+        const sendBtn = document.getElementById('sendBtn');
+        const logDiv = document.getElementById('log');
+
+        let socket;
+
+        function logMessage(message) {
+            const p = document.createElement('p');
+            p.textContent = message;
+            logDiv.appendChild(p);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        connectBtn.addEventListener('click', () => {
+            const roomID = roomIDInput.value;
+            if (!roomID) {
+                alert('Please enter a Room ID.');
+                return;
+            }
+
+            socket = new WebSocket(`ws://localhost:8080/ws/game/${roomID}`);
+
+            socket.onopen = () => {
+                logMessage('Status: Connected');
+                sendBtn.disabled = false;
+                connectBtn.disabled = true;
+            };
+
+            socket.onmessage = (event) => {
+                logMessage(`Received: ${event.data}`);
+            };
+
+            socket.onclose = () => {
+                logMessage('Status: Disconnected');
+                sendBtn.disabled = true;
+                connectBtn.disabled = false;
+            };
+
+            socket.onerror = (error) => {
+                logMessage(`Error: ${error.message}`);
+            };
+        });
+
+        sendBtn.addEventListener('click', () => {
+            const message = messageInput.value;
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                // For this test, we send a simple string.
+                // In the real app, we'll send JSON like:
+                // const msg = JSON.stringify({ action: "move", payload: { from: "e2", to: "e4" } });
+                socket.send(message);
+                logMessage(`Sent: ${message}`);
+                messageInput.value = '';
+            }
+        });
+    </script>
+</body>
+</html>

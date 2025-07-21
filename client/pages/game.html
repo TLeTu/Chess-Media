@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess Game</title>
+    <link rel="stylesheet" href="/node_modules/@chrisoakman/chessboardjs/dist/chessboard-1.0.0.min.css">
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; flex-direction: column; }
+        .game-container { display: flex; align-items: center; gap: 20px; }
+        .info { font-size: 1.2em; }
+    </style>
+</head>
+<body>
+    <h1>Multiplayer Chess</h1>
+    <div class="game-container">
+        <div id="myBoard" style="width: 400px"></div>
+        <div class="info">
+            <p>Status: <span id="status"></span></p>
+            <p>FEN: <span id="fen"></span></p>
+        </div>
+    </div>
+
+    <script src="/node_modules/jquery/dist/jquery.min.js"></script>
+    <script src="/node_modules/@chrisoakman/chessboardjs/dist/chessboard-1.0.0.min.js"></script>
+    <script src="/src/game.js"></script>
+</body>
+</html>
