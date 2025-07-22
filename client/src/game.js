@@ -3,7 +3,8 @@ document.addEventListener('DOMContentLoaded', function() {
     let socket = null;
     const statusEl = document.getElementById('status');
     const fenEl = document.getElementById('fen');
-    let currentFen = 'start'; // Store the last known good FEN
+    let currentFen = 'start';
+    let myColor = 'spectator'; // Default to spectator
 
     // --- WebSocket Connection ---
     function connect() {
@@ -44,6 +45,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Message Handling ---
     function handleServerMessage(message) {
         switch (message.action) {
+            case 'player_assigned':
+                myColor = message.payload.color;
+                if (myColor === 'black') {
+                    board.orientation('black');
+                }
+                document.querySelector('h1').textContent = `Multiplayer Chess (You are ${myColor})`;
+                break;
             case 'game_state':
                 updateGame(message.payload);
                 break;
@@ -66,6 +74,25 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- Game Logic and Board UI ---
+    function onDragStart (source, piece, position, orientation) {
+      // Do not pick up pieces if the game is over
+      if (statusEl.textContent.includes('checkmate') || statusEl.textContent.includes('stalemate')) {
+        return false
+      }
+
+      // Only pick up pieces for the side to move
+      if ((position.turn === 'w' && piece.search(/^b/) !== -1) ||
+          (position.turn === 'b' && piece.search(/^w/) !== -1)) {
+        return false
+      }
+      
+      // Only allow player to move their own pieces
+      if ((myColor === 'white' && piece.search(/^b/) !== -1) ||
+          (myColor === 'black' && piece.search(/^w/) !== -1)) {
+          return false;
+      }
+    }
+
     function onDrop(source, target) {
         currentFen = board.fen();
         const move = { from: source, to: target };
@@ -77,14 +104,15 @@ document.addEventListener('DOMContentLoaded', function() {
             board.position(gameState.fen, false);
         }
         currentFen = gameState.fen;
-        statusEl.textContent = gameState.gameStatus.replace(/_/g, ' ');
+        statusEl.textContent = gameState.game_status.replace(/_/g, ' ');
         fenEl.textContent = gameState.fen;
     }
 
     const config = {
         draggable: true,
         position: 'start',
-        onDrop: onDrop
+        onDrop: onDrop,
+        onDragStart: onDragStart,
     };
 
     board = Chessboard('myBoard', config);

@@ -1,11 +1,9 @@
 package ws
 
-import "encoding/json"
-
 // Message defines the structure for messages sent over WebSocket
 type Message struct {
-	Action  string          `json:"action"`
-	Payload json.RawMessage `json:"payload"`
+	Action  string      `json:"action"`
+	Payload interface{} `json:"payload"`
 }
 
 // MovePayLoad defines the payload for a "move" action
@@ -23,4 +21,9 @@ type GameStatePayload struct {
 // ErrorPayload defines the payload for an "error" message
 type ErrorPayload struct {
 	Message string `json:"message"`
+}
+
+// PlayerAssignmentPayload defines the payload for a "player_assigned" action
+type PlayerAssignmentPayload struct {
+	Color string `json:"color"` //white black spectator
 }

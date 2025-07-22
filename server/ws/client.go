@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/TLeTu/Chess-Media/server/engine"
 	"github.com/gorilla/websocket"
 )
 
@@ -40,7 +41,8 @@ type Client struct {
 	// Buffered channel of outbound messages
 	Send chan []byte
 
-	RoomID string
+	PlayerColor engine.Color
+	RoomID      string
 }
 
 // readPump pumps messages from the websocket connection to the hub
