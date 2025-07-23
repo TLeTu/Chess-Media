@@ -7,13 +7,40 @@
     <link rel="stylesheet" href="/node_modules/@chrisoakman/chessboardjs/dist/chessboard-1.0.0.min.css">
     <style>
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; flex-direction: column; }
-        .game-container { display: flex; align-items: center; gap: 20px; }
+        .hidden { display: none; }
+        .lobby-container, .game-container { width: 100%; max-width: 500px; text-align: center; margin-bottom: 20px; }
+        .game-container { display: flex; align-items: center; gap: 20px; text-align: left; }
         .info { font-size: 1.2em; }
+        #hostControls, #lobbyStatus { margin: 15px 0; }
+        button { font-size: 1em; padding: 10px 15px; cursor: pointer; }
     </style>
 </head>
 <body>
     <h1>Multiplayer Chess</h1>
-    <div class="game-container">
+
+    <!-- Lobby View -->
+    <div id="lobbyContainer" class="lobby-container">
+        <h2>Game Lobby</h2>
+        <div id="lobbyStatus">Waiting for players...</div>
+
+        <div id="hostControls" class="hidden">
+            <h4>Host Controls</h4>
+            <p>Choose your color:</p>
+            <input type="radio" id="colorWhite" name="color" value="white">
+            <label for="colorWhite">White</label>
+            <input type="radio" id="colorBlack" name="color" value="black">
+            <label for="colorBlack">Black</label>
+            <input type="radio" id="colorRandom" name="color" value="random" checked>
+            <label for="colorRandom">Random</label>
+            <br><br>
+            <button id="startGameBtn">Start Game</button>
+        </div>
+
+        <button id="readyBtn">Ready</button>
+    </div>
+
+    <!-- Game View -->
+    <div id="gameContainer" class="game-container hidden">
         <div id="myBoard" style="width: 400px"></div>
         <div class="info">
             <p>Status: <span id="status"></span></p>

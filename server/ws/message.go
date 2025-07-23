@@ -7,9 +7,10 @@ type Message struct {
 }
 
 // MovePayLoad defines the payload for a "move" action
-type MovePayLoad struct {
-	From string `json:"from"`
-	To   string `json:"to"`
+type MovePayload struct {
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Promotion string `json:"promotion,omitempty"`
 }
 
 // GameStatePayload defines the payload for a "game_state" update
@@ -26,4 +27,19 @@ type ErrorPayload struct {
 // PlayerAssignmentPayload defines the payload for a "player_assigned" action
 type PlayerAssignmentPayload struct {
 	Color string `json:"color"` //white black spectator
+}
+
+// AssignColorPayload is sent by the host to choose a color
+type AssignColorPayload struct {
+	Color string `json:"color"` //white black
+}
+
+// LobbyStatePayload is broadcast by the server to update all clients on the lobby status
+type LobbyStatePayload struct {
+	HostReady   bool   `json:"host_ready"`
+	GuestReady  bool   `json:"guest_ready"`
+	HostColor   string `json:"host_color"`
+	IsHost      bool   `json:"is_host"`
+	GameState   string `json:"game_state"`
+	PlayerCount int    `json:"player_count"`
 }
