@@ -12,6 +12,15 @@ import (
 	"github.com/joho/godotenv"
 )
 
+func NoCache() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		c.Next()
+	}
+}
+
 func main() {
 	err := godotenv.Load()
 	if err != nil {
@@ -25,6 +34,7 @@ func main() {
 	go hub.Run()
 
 	r := gin.Default()
+	r.Use(NoCache())
 
 	r.StaticFile("/", "../client/pages/index.html")
 	r.StaticFile("/bot", "../client/pages/bot-chess.html")
