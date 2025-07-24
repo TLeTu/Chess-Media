@@ -39,9 +39,18 @@ async function handlePlayerMove(source, target) {
 
     console.log('Sending FEN:', currentFen); // Debugging line
 
+    const token = localStorage.getItem('jwtToken');
+    if (!token) {
+        window.location.href = '/login';
+        return;
+    }
+
     const response = await fetch(`/api/bot/move`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
             currentFen: currentFen,
             playerMove: playerMove,

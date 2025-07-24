@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"math/rand"
-	"time"
 
+	"github.com/TLeTu/Chess-Media/server/database"
 	"github.com/TLeTu/Chess-Media/server/engine"
 )
 
@@ -22,25 +22,29 @@ type Room struct {
 	Unregister chan *Client
 	Hub        *Hub
 	Game       *engine.Position
+
+	IsRanked bool
+
+	PendingRankedPlayers map[uint]engine.Color // map[userID]assignedColor
 }
 
-func NewRoom(id string, hub *Hub) *Room {
+func NewRoom(id string, hub *Hub, isRanked bool) *Room {
 	return &Room{
-		ID:         id,
-		Players:    make(map[engine.Color]*Client),
-		Spectators: make(map[*Client]bool),
-		Host:       nil,
-		GameState:  "waiting",
-		ReadyState: make(map[*Client]bool),
-		Broadcast:  make(chan *ClientMessage),
-		Register:   make(chan *Client),
-		Unregister: make(chan *Client),
-		Hub:        hub,
-		Game:       engine.NewGame(),
+		ID:                   id,
+		Players:              make(map[engine.Color]*Client),
+		Spectators:           make(map[*Client]bool),
+		Host:                 nil,
+		GameState:            "waiting",
+		ReadyState:           make(map[*Client]bool),
+		Broadcast:            make(chan *ClientMessage),
+		Register:             make(chan *Client),
+		Unregister:           make(chan *Client),
+		Hub:                  hub,
+		Game:                 engine.NewGame(),
+		IsRanked:             isRanked,
+		PendingRankedPlayers: make(map[uint]engine.Color),
 	}
 }
-
-// --- Helper functions ---
 
 func (r *Room) getGuest() *Client {
 	for _, p := range r.Players {
@@ -64,16 +68,16 @@ func (r *Room) getAllClients() map[*Client]bool {
 	return all
 }
 
-// --- Broadcasting functions ---
-
 func (r *Room) broadcastLobbyState() {
+	if r.IsRanked {
+		return
+	}
 	var hostReady, guestReady bool
 	var hostColor string
 	guest := r.getGuest()
 
 	if r.Host != nil {
 		hostReady = r.ReadyState[r.Host]
-		// Find the color of the host
 		for color, client := range r.Players {
 			if client == r.Host {
 				hostColor = color.String()
@@ -94,6 +98,7 @@ func (r *Room) broadcastLobbyState() {
 			IsHost:      isHost,
 			GameState:   r.GameState,
 			PlayerCount: len(r.Players),
+			GameType:    "unranked",
 		}
 		message := Message{Action: "lobby_state", Payload: payload}
 		messageBytes, _ := json.Marshal(message)
@@ -121,8 +126,6 @@ func (r *Room) sendErrorMessage(client *Client, message string) {
 	client.Send <- messageBytes
 }
 
-// --- Logic for handling lobby actions ---
-
 func (r *Room) handleAssignColor(sender *Client, payload interface{}) {
 	if sender != r.Host {
 		r.sendErrorMessage(sender, "Only the host can assign colors.")
@@ -134,12 +137,6 @@ func (r *Room) handleAssignColor(sender *Client, payload interface{}) {
 	json.Unmarshal(payloadBytes, &colorPayload)
 
 	guest := r.getGuest()
-	// Clear existing player assignments to be safe
-	// r.Players = make(map[engine.Color]*Client)
-
-	// Log out the colorPayload.color
-	log.Printf("Color host chose: %s", colorPayload.Color)
-
 	var hostC, guestC engine.Color
 	switch colorPayload.Color {
 	case "white":
@@ -147,7 +144,6 @@ func (r *Room) handleAssignColor(sender *Client, payload interface{}) {
 	case "black":
 		hostC, guestC = engine.Black, engine.White
 	case "random":
-		rand.Seed(time.Now().UnixNano())
 		if rand.Intn(2) == 0 {
 			hostC, guestC = engine.White, engine.Black
 		} else {
@@ -157,16 +153,12 @@ func (r *Room) handleAssignColor(sender *Client, payload interface{}) {
 		r.sendErrorMessage(sender, "Invalid color selection.")
 		return
 	}
-	// Log out the host and guess color
-	log.Printf("Host color: %s", hostC.String())
-	log.Printf("Guest color: %s", guestC.String())
 
 	r.Host.PlayerColor = hostC
 	if guest != nil {
 		guest.PlayerColor = guestC
 	}
-	// Log out the color assigned to host
-	log.Printf("Host color assigned: %s", r.Host.PlayerColor.String())
+
 	newPlayersMap := make(map[engine.Color]*Client)
 	newPlayersMap[hostC] = r.Host
 	if guest != nil {
@@ -181,7 +173,7 @@ func (r *Room) handlePlayerReady(sender *Client) {
 	if r.GameState != "waiting" {
 		return
 	}
-	r.ReadyState[sender] = !r.ReadyState[sender] // Toggle readiness
+	r.ReadyState[sender] = !r.ReadyState[sender]
 	r.broadcastLobbyState()
 }
 
@@ -199,7 +191,6 @@ func (r *Room) handleStartGame(sender *Client) {
 		r.sendErrorMessage(sender, "Guest must be ready.")
 		return
 	}
-	// Check if colors have been assigned
 	if r.Host.PlayerColor == engine.NoColor || guest.PlayerColor == engine.NoColor {
 		r.sendErrorMessage(sender, "The host must select a color first.")
 		return
@@ -213,14 +204,9 @@ func (r *Room) handleStartGame(sender *Client) {
 				colorStr = "white"
 			} else if color == engine.Black {
 				colorStr = "black"
-			} else {
-				continue
 			}
 			payload := PlayerAssignmentPayload{Color: colorStr}
-			message := Message{
-				Action:  "player_assigned",
-				Payload: payload,
-			}
+			message := Message{Action: "player_assigned", Payload: payload}
 			messageBytes, _ := json.Marshal(message)
 			client.Send <- messageBytes
 		}
@@ -228,8 +214,6 @@ func (r *Room) handleStartGame(sender *Client) {
 
 	r.broadcastGameState()
 }
-
-// --- Main Room Logic ---
 
 func (r *Room) Run() {
 	for {
@@ -244,7 +228,7 @@ func (r *Room) Run() {
 			sender := clientMessage.Client
 			message := clientMessage.Message
 
-			if r.GameState == "waiting" {
+			if r.GameState == "waiting" && !r.IsRanked {
 				switch message.Action {
 				case "assign_color":
 					r.handleAssignColor(sender, message.Payload)
@@ -256,10 +240,9 @@ func (r *Room) Run() {
 					log.Printf("Action '%s' not allowed during 'waiting' state.", message.Action)
 				}
 			} else if r.GameState == "in_progress" {
-				switch message.Action {
-				case "move":
+				if message.Action == "move" {
 					r.handleMove(sender, message.Payload)
-				default:
+				} else {
 					log.Printf("Action '%s' not allowed during 'in_progress' state.", message.Action)
 				}
 			}
@@ -267,30 +250,80 @@ func (r *Room) Run() {
 	}
 }
 
-// --- Utility and Registration/Unregistration handlers ---
-
 func (r *Room) handleClientRegistration(client *Client) {
 	client.Room = r
 
+	if r.IsRanked {
+		assignedColor, ok := r.PendingRankedPlayers[client.UserID]
+		if !ok {
+			log.Printf("Error: Ranked client %d connected without pending data.", client.UserID)
+			r.sendErrorMessage(client, "Error: Could not join ranked game. Missing player data.")
+			close(client.Send)
+			return
+		}
+
+		client.PlayerColor = assignedColor
+		r.Players[assignedColor] = client
+		delete(r.PendingRankedPlayers, client.UserID)
+
+		log.Printf("Client %d registered to ranked room %s. Color: %s", client.UserID, r.ID, client.PlayerColor.String())
+
+		if len(r.Players) == 2 {
+			r.GameState = "in_progress"
+			for color, p := range r.Players {
+				if p != nil {
+					var colorStr string
+					if color == engine.White {
+						colorStr = "white"
+					} else if color == engine.Black {
+						colorStr = "black"
+					}
+					payload := PlayerAssignmentPayload{Color: colorStr}
+					message := Message{Action: "player_assigned", Payload: payload}
+					messageBytes, _ := json.Marshal(message)
+					p.Send <- messageBytes
+				}
+			}
+			r.broadcastGameState()
+		}
+		return
+	}
+
+	// Unranked game logic
 	if r.Host == nil {
 		r.Host = client
 	}
 
-	// Assign to players or spectators
 	if len(r.Players) < 2 {
-		// Use a temporary, unique key for each player in the lobby to avoid collision
-		tempKey := engine.Color(10 + len(r.Players)) // 10 for host, 11 for guest
+		tempKey := engine.Color(10 + len(r.Players))
 		r.Players[tempKey] = client
 	} else {
 		r.Spectators[client] = true
 	}
 
-	r.ReadyState[client] = false // All players start as not ready
+	r.ReadyState[client] = false
 	log.Printf("Client registered to room %s. Players: %d, Spectators: %d", r.ID, len(r.Players), len(r.Spectators))
 	r.broadcastLobbyState()
 }
 
 func (r *Room) handleClientUnregistration(client *Client) {
+	if r.IsRanked {
+		log.Printf("Client %d unregistered from ranked room %s.", client.UserID, r.ID)
+		for _, p := range r.Players {
+			if p != nil && p != client {
+				r.sendErrorMessage(p, "Opponent disconnected. Game ended.")
+				close(p.Send)
+			}
+		}
+		for s := range r.Spectators {
+			r.sendErrorMessage(s, "Game ended due to player disconnection.")
+			close(s.Send)
+		}
+		r.Hub.deleteRoom(r.ID)
+		return
+	}
+
+	// Unranked game logic
 	if client == r.Host {
 		log.Printf("Host disconnected from room %s. Closing room.", r.ID)
 		for c := range r.getAllClients() {
@@ -326,7 +359,6 @@ func (r *Room) handleClientUnregistration(client *Client) {
 	r.broadcastLobbyState()
 }
 
-// handleMove needs to be included as well
 func (r *Room) handleMove(sender *Client, payload interface{}) {
 	if sender.PlayerColor == engine.NoColor {
 		r.sendErrorMessage(sender, "Spectators cannot make moves.")
@@ -349,5 +381,49 @@ func (r *Room) handleMove(sender *Client, payload interface{}) {
 		return
 	}
 	r.Game = engine.ApplyMove(r.Game, move)
+
+	gameStatus := r.Game.GetGameStatus()
+	if gameStatus != engine.InProgress {
+		log.Printf("Game %s ended with status: %s", r.ID, gameStatus.String())
+
+		if r.IsRanked {
+			var winner, loser *Client
+			if gameStatus == engine.Checkmate {
+				winner = r.Players[r.Game.Turn.Opponent()]
+				loser = r.Players[r.Game.Turn]
+			} else {
+				log.Printf("Ranked game %s ended in a draw. No ELO changes.", r.ID)
+			}
+
+			if winner != nil && loser != nil {
+				winner.UserELO += 100
+				loser.UserELO -= 50
+
+				if err := database.UpdateUserELO(winner.User.ID, winner.UserELO); err != nil {
+					log.Printf("Error updating ELO for winner %d: %v", winner.UserID, err)
+				}
+				if err := database.UpdateUserELO(loser.User.ID, loser.UserELO); err != nil {
+					log.Printf("Error updating ELO for loser %d: %v", loser.UserID, err)
+				}
+
+				log.Printf("ELO updated: Winner %d (New ELO: %d), Loser %d (New ELO: %d)",
+					winner.UserID, winner.UserELO, loser.UserID, loser.UserELO)
+			}
+		}
+
+		for _, p := range r.Players {
+			if p != nil {
+				r.sendErrorMessage(p, "Game Over: "+gameStatus.String())
+				close(p.Send)
+			}
+		}
+		for s := range r.Spectators {
+			r.sendErrorMessage(s, "Game Over: "+gameStatus.String())
+			close(s.Send)
+		}
+		r.Hub.deleteRoom(r.ID)
+		return
+	}
+
 	r.broadcastGameState()
 }

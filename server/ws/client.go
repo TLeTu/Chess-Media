@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/TLeTu/Chess-Media/server/engine"
+	"github.com/TLeTu/Chess-Media/server/models"
 	"github.com/gorilla/websocket"
 )
 
@@ -32,6 +33,8 @@ var upgrader = websocket.Upgrader{
 type Client struct {
 	Hub *Hub
 
+	UserID uint // Use the user's ID from the database
+
 	// The room the client is in
 	Room *Room
 
@@ -43,6 +46,8 @@ type Client struct {
 
 	PlayerColor engine.Color
 	RoomID      string
+	UserELO     int // User's ELO rating
+	User        *models.User // Reference to the authenticated user
 }
 
 // readPump pumps messages from the websocket connection to the hub
@@ -90,6 +95,7 @@ func (c *Client) writePump() {
 	for {
 		select {
 		case message, ok := <-c.Send:
+			log.Printf("Client %d: Sending message %s", c.UserID, string(message))
 			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				// The hub closed the channel

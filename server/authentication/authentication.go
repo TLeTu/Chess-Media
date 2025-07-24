@@ -1,9 +1,9 @@
 package authentication
 
 import (
-	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/TLeTu/Chess-Media/server/database"
@@ -13,7 +13,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-var secretKey = []byte("secret-key")
+var SecretKey = []byte("secret-key")
 
 func createToken(username string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256,
@@ -22,7 +22,7 @@ func createToken(username string) (string, error) {
 			"exp":      time.Now().Add(time.Hour * 24).Unix(),
 		})
 
-	tokenString, err := token.SignedString(secretKey)
+	tokenString, err := token.SignedString(SecretKey)
 	if err != nil {
 		return "", err
 	}
@@ -30,20 +30,14 @@ func createToken(username string) (string, error) {
 	return tokenString, nil
 }
 
-func verifyToken(tokenString string) error {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return secretKey, nil
+func verifyToken(tokenString string) (*jwt.Token, error) {
+	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		return SecretKey, nil
 	})
+}
 
-	if err != nil {
-		return err
-	}
-
-	if !token.Valid {
-		return fmt.Errorf("invalid token")
-	}
-
-	return nil
+func GetSecretKey() []byte {
+	return SecretKey
 }
 
 func LoginHandler(c *gin.Context) {
@@ -76,7 +70,6 @@ func RegisterHandler(c *gin.Context) {
 	var u models.User
 	if err := c.ShouldBindJSON(&u); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		// Log the error
 		log.Printf("Error binding JSON: %v", err)
 		return
 	}
@@ -100,21 +93,50 @@ func RegisterHandler(c *gin.Context) {
 }
 
 func ValidateHandler(c *gin.Context) {
-	tokenString := c.GetHeader("Authorization")
-	if tokenString == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing authorization header"})
-		return
-	}
-	tokenString = tokenString[len("Bearer "):]
-
-	err := verifyToken(tokenString)
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-		return
-	}
-
 	c.String(http.StatusOK, "Token validated")
+}
 
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is missing"})
+			return
+		}
+
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenString == authHeader {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization header format must be Bearer {token}"})
+			return
+		}
+
+		token, err := verifyToken(tokenString)
+		if err != nil || !token.Valid {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			return
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			return
+		}
+
+		username, ok := claims["username"].(string)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid username claim"})
+			return
+		}
+
+		var user models.User
+		if err := database.DB.Where("email = ?", username).First(&user).Error; err != nil {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+
+		c.Set("user", user)
+		c.Next()
+	}
 }
 
 // HashPassword generates a bcrypt hash for the given password.

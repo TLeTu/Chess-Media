@@ -432,6 +432,11 @@ func oppositeColor(c engine.Color) engine.Color {
 var smartBot = NewChessBot(4) // Search depth of 4 moves
 
 func BotMoveHandler(c *gin.Context) {
+	_, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
 	var req MoveRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})

@@ -42,4 +42,5 @@ type LobbyStatePayload struct {
 	IsHost      bool   `json:"is_host"`
 	GameState   string `json:"game_state"`
 	PlayerCount int    `json:"player_count"`
+	GameType    string `json:"game_type"` // "ranked" or "unranked"
 }

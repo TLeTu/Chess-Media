@@ -23,8 +23,15 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
+        const token = localStorage.getItem('jwtToken');
+        if (!token) {
+            alert('Authentication token not found!');
+            window.location.href = '/login';
+            return;
+        }
+
         const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-        const wsURL = `${protocol}${window.location.host}/ws/game/${roomID}`;
+        const wsURL = `${protocol}${window.location.host}/ws/game/${roomID}?token=${token}`;
         socket = new WebSocket(wsURL);
 
         socket.onopen = () => console.log('WebSocket connection established');
@@ -71,17 +78,24 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- UI Update Functions ---
     function updateLobbyView(state) {
-        lobbyContainer.classList.remove('hidden');
-        gameContainer.classList.add('hidden');
+        // Only show lobby for non-ranked games
+        if (state.game_type !== 'ranked') {
+            lobbyContainer.classList.remove('hidden');
+            gameContainer.classList.add('hidden');
 
-        hostControls.classList.toggle('hidden', !state.is_host);
-        readyBtn.classList.toggle('hidden', state.is_host);
+            hostControls.classList.toggle('hidden', !state.is_host);
+            readyBtn.classList.toggle('hidden', state.is_host);
 
-        let statusText = `Players: ${state.player_count}/2.`;
-        statusText += ` You are ${state.is_host ? 'the Host' : 'the Guest'}.`;
-        lobbyStatus.innerHTML = `${statusText}<br>Guest is ${state.guest_ready ? 'Ready' : 'Not Ready'}.`;
+            let statusText = `Players: ${state.player_count}/2.`;
+            statusText += ` You are ${state.is_host ? 'the Host' : 'the Guest'}.`;
+            lobbyStatus.innerHTML = `${statusText}<br>Guest is ${state.guest_ready ? 'Ready' : 'Not Ready'}.`;
 
-        readyBtn.textContent = state.guest_ready ? 'Unready' : 'Ready';
+            readyBtn.textContent = state.guest_ready ? 'Unready' : 'Ready';
+        } else {
+            // For ranked games, hide lobby and show game container immediately
+            lobbyContainer.classList.add('hidden');
+            gameContainer.classList.remove('hidden');
+        }
     }
 
     function updateGameView(gameState) {

@@ -26,6 +26,13 @@ func (c Color) String() string {
 	}
 }
 
+func (c Color) Opponent() Color {
+	if c == White {
+		return Black
+	}
+	return White
+}
+
 // PieceType represents the type of a chess piece.
 type PieceType int
 

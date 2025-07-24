@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/TLeTu/Chess-Media/server/models"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -29,4 +30,13 @@ func Connect() {
 	}
 
 	log.Println("Database connection established successfully.")
+}
+
+// UpdateUserELO updates a user's ELO in the database
+func UpdateUserELO(userID uint, newELO int) error {
+	result := DB.Model(&models.User{}).Where("id = ?", userID).Update("ELO", newELO)
+	if result.Error != nil {
+		return fmt.Errorf("failed to update ELO for user %d: %w", userID, result.Error)
+	}
+	return nil
 }

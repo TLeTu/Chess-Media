@@ -46,13 +46,16 @@ func main() {
 	r.Static("/img", "../client/assets/img")
 	r.Static("/node_modules", "../client/node_modules")
 
+	api := r.Group("/api")
+	api.Use(authentication.AuthMiddleware()) // Apply auth middleware to all /api routes
+	{
+		api.POST("/rooms/create", ws.CreateRoomHandler)
+		api.POST("/bot/move", bot.BotMoveHandler)
+		api.GET("/validate", authentication.ValidateHandler)
+	}
+
 	r.POST("/api/login", authentication.LoginHandler)
 	r.POST("/api/register", authentication.RegisterHandler)
-	r.GET("/api/validate", authentication.ValidateHandler)
-
-	r.POST("/api/bot/move", bot.BotMoveHandler)
-
-	r.POST("/api/rooms/create", ws.CreateRoomHandler)
 
 	// WebSocket endpoint
 	r.GET("/ws/game/:roomID", func(c *gin.Context) {
