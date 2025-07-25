@@ -93,7 +93,19 @@ func RegisterHandler(c *gin.Context) {
 }
 
 func ValidateHandler(c *gin.Context) {
-	c.String(http.StatusOK, "Token validated")
+	user, exists := c.Get("user")
+	if !exists {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "User not found in context"})
+		return
+	}
+
+	u, ok := user.(models.User)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Invalid user type in context"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Token validated", "elo": u.ELO})
 }
 
 func AuthMiddleware() gin.HandlerFunc {

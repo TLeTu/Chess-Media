@@ -1,0 +1,48 @@
+/* General Body Styles */
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background-color: #f8f9fa; /* A slightly lighter grey for a cleaner look */
+}
+
+/* Main container adjustments */
+.container, .container-fluid {
+    flex-grow: 1;
+}
+
+/* Chessboard Styling */
+#myBoard {
+    max-width: 600px; /* Limit the max width of the board */
+    width: 100%; /* Make it responsive */
+    margin: 0 auto; /* Center the board */
+    box-shadow: 0 0 15px rgba(0,0,0,0.2); /* Add a subtle shadow for depth */
+    border-radius: 8px; /* Slightly rounded corners */
+    overflow: hidden; /* Ensures the shadow respects the border radius */
+}
+
+/* Card styling for a consistent look */
+.card {
+    border: none; /* Remove default card borders */
+}
+
+/* Utility to hide elements */
+.hidden {
+    display: none !important;
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 768px) {
+    h1 {
+        font-size: 1.75rem;
+    }
+
+    .btn-lg {
+        padding: 0.75rem 1.25rem;
+        font-size: 1.1rem;
+    }
+
+    #gameContainer .col-lg-3 {
+        order: -1; /* Move game info above the board on small screens */
+    }
+}

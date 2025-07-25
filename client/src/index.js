@@ -2,8 +2,11 @@ let botBtn = document.getElementById("botBtn");
 let rankBtn = document.getElementById("rankBtn");
 let joinBtn = document.getElementById("joinBtn");
 let hostBtn = document.getElementById("hostBtn");
+let leaveQueueBtn = document.getElementById("leaveQueueBtn"); // New button
 
 let queueStatusMessage = document.getElementById("queueStatusMessage");
+let eloDisplay = document.getElementById("eloDisplay");
+let eloValue = document.getElementById("eloValue");
 
 // Function to update the queue status message
 function updateQueueStatus(message) {
@@ -12,10 +15,19 @@ function updateQueueStatus(message) {
     }
 }
 
+// Function to toggle button visibility
+function toggleGameButtons(show) {
+    rankBtn.classList.toggle('hidden', !show);
+    hostBtn.classList.toggle('hidden', !show);
+    joinBtn.classList.toggle('hidden', !show);
+    botBtn.classList.toggle('hidden', !show);
+    leaveQueueBtn.classList.toggle('hidden', show);
+}
+
 async function validate() {
     const token = localStorage.getItem('jwtToken');
     if (!token) {
-        return false;
+        return { isValid: false };
     }
     try {
         const response = await fetch('/api/validate', {
@@ -24,12 +36,28 @@ async function validate() {
                 'Content-Type': 'application/json'
             }
         });
-        return response.ok;
+        if (response.ok) {
+            const data = await response.json();
+            return { isValid: true, elo: data.elo };
+        } else {
+            return { isValid: false };
+        }
     } catch (error) {
         console.error('Error during validation:', error);
-        return false;
+        return { isValid: false };
     }
 }
+
+// Initial check for ELO display on page load
+document.addEventListener('DOMContentLoaded', async () => {
+    const validationResult = await validate();
+    if (validationResult.isValid) {
+        eloValue.textContent = validationResult.elo;
+        eloDisplay.classList.remove('hidden');
+    } else {
+        eloDisplay.classList.add('hidden');
+    }
+});
 
 botBtn.addEventListener("click", async function() {
     const token = localStorage.getItem('jwtToken');
@@ -46,7 +74,7 @@ hostBtn.addEventListener("click", async function() {
     const token = localStorage.getItem('jwtToken');
     if (token) {
         try {
-            const response = await fetch('/api/rooms/create', { 
+            const response = await fetch('/api/rooms/create', {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -81,39 +109,43 @@ joinBtn.addEventListener("click", async function() {
 
 
 // --- Ranked Button ---
+let rankedWs = null; // Declare a variable to hold the WebSocket connection
+
 rankBtn.addEventListener("click", async function() {
-    if (!(await validate())) {
+    const validationResult = await validate();
+    if (!validationResult.isValid) {
         window.location.href = '/login';
         return;
     }
 
     // Clear any previous messages
     updateQueueStatus("Searching for a ranked opponent...");
+    toggleGameButtons(false); // Hide game buttons, show leave queue button
 
     const token = localStorage.getItem('jwtToken');
     if (!token) {
         updateQueueStatus('You must be logged in to play ranked games.');
+        toggleGameButtons(true); // Show game buttons again
         return;
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
     const wsURL = `${protocol}${window.location.host}/ws/game/ranked?token=${token}`; // Pass token as query parameter
 
-    const ws = new WebSocket(wsURL);
+    rankedWs = new WebSocket(wsURL); // Assign to the global variable
 
-    ws.onopen = () => {
+    rankedWs.onopen = () => {
         console.log('Connected to ranked queue WebSocket');
-        // updateQueueStatus('Searching for a ranked opponent...'); // Already set above
-        // Optionally disable the ranked button or show a loading indicator
     };
 
-    ws.onmessage = (event) => {
+    rankedWs.onmessage = (event) => {
         const msg = JSON.parse(event.data);
         console.log('Received message from ranked queue:', msg);
 
         switch (msg.action) {
             case 'match_found':
                 updateQueueStatus(`Match found! Redirecting...`);
+                toggleGameButtons(true); // Show game buttons again
                 // Redirect to the game page with the assigned room ID
                 window.location.href = `/game?room=${msg.payload.roomID}`;
                 break;
@@ -123,22 +155,29 @@ rankBtn.addEventListener("click", async function() {
                 break;
             case 'error':
                 updateQueueStatus(`Error: ${msg.payload.message}`);
-                // Re-enable the ranked button or hide loading indicator
+                toggleGameButtons(true); // Show game buttons again
                 break;
             default:
                 console.log('Unknown message action:', msg.action);
         }
     };
 
-    ws.onclose = () => {
+    rankedWs.onclose = () => {
         console.log('Disconnected from ranked queue WebSocket');
         updateQueueStatus('Disconnected from queue.');
-        // Re-enable the ranked button or hide loading indicator
+        toggleGameButtons(true); // Show game buttons again
     };
 
-    ws.onerror = (error) => {
+    rankedWs.onerror = (error) => {
         console.error('Ranked queue WebSocket error:', error);
         updateQueueStatus('An error occurred with the ranked queue. Please try again.');
-        // Re-enable the ranked button or hide loading indicator
+        toggleGameButtons(true); // Show game buttons again
     };
+});
+
+leaveQueueBtn.addEventListener("click", function() {
+    if (rankedWs && rankedWs.readyState === WebSocket.OPEN) {
+        rankedWs.close(); // Close the WebSocket connection
+        updateQueueStatus('Leaving ranked queue...');
+    }
 });

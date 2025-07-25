@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const readyBtn = document.getElementById('readyBtn');
     const statusEl = document.getElementById('status');
     const fenEl = document.getElementById('fen');
+    const roomIDDisplay = document.getElementById('roomIDDisplay'); // New element
 
     // --- WebSocket Connection ---
     function connect() {
@@ -21,6 +22,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!roomID) {
             alert('No room ID specified!');
             return;
+        }
+        if (roomIDDisplay) {
+            roomIDDisplay.textContent = roomID;
         }
 
         const token = localStorage.getItem('jwtToken');
@@ -45,11 +49,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Message Handling ---
     function handleServerMessage(message) {
+        console.log('Received server message:', message.action, message.payload);
         switch (message.action) {
             case 'lobby_state':
+                console.log('Updating lobby view. Game type:', message.payload.game_type);
                 updateLobbyView(message.payload);
                 break;
             case 'game_state':
+                console.log('Updating game view. FEN:', message.payload.fen);
                 updateGameView(message.payload);
                 break;
             case 'error':
@@ -102,8 +109,10 @@ document.addEventListener('DOMContentLoaded', function() {
         lobbyContainer.classList.add('hidden');
         gameContainer.classList.remove('hidden');
 
+        console.log('Board object:', board); // Check if board is initialized
         if (board) {
             board.position(gameState.fen, false);
+            board.resize(); // Ensure the board redraws itself
         }
         currentFen = gameState.fen;
         const gameStatusText = gameState.game_status.replace(/_/g, ' ');
